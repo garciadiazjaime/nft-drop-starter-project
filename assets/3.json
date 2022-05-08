@@ -1,0 +1,19 @@
+{
+  "name": "Rufino Tamayo",
+  "symbol": "MX3",
+  "image": "3.png",
+  "properties": {
+    "files": [
+      {
+        "uri": "3.png",
+        "type": "image/png"
+      }
+    ],
+    "creators": [
+      {
+        "address": "2e5Lewq6enjMXs4LAozVgZgSuE9j6UJHVrY7mdzYRg56",
+        "share": 100
+      }
+    ]
+  }
+}

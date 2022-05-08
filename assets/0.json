@@ -1,0 +1,19 @@
+{
+  "name": "José Clemente Orozco",
+  "symbol": "MX0",
+  "image": "0.png",
+  "properties": {
+    "files": [
+      {
+        "uri": "0.png",
+        "type": "image/png"
+      }
+    ],
+    "creators": [
+      {
+        "address": "2e5Lewq6enjMXs4LAozVgZgSuE9j6UJHVrY7mdzYRg56",
+        "share": 100
+      }
+    ]
+  }
+}

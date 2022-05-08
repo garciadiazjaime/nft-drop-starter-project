@@ -1,8 +1,12 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
 import { Program, Provider, web3 } from '@project-serum/anchor';
 import { MintLayout, TOKEN_PROGRAM_ID, Token } from '@solana/spl-token';
+import bs58 from 'bs58';
+
+
 import { sendTransactions } from './connection';
+import CountdownTimer from '../CountdownTimer';
 import './CandyMachine.css';
 import {
   candyMachineProgram,
@@ -20,6 +24,7 @@ const opts = {
 };
 
 const CandyMachine = ({ walletAddress }) => {
+  const [candyMachine, setCandyMachine] = useState(null)
 
   const getCandyMachineCreator = async (candyMachine) => {
     const candyMachineID = new PublicKey(candyMachine);
@@ -297,14 +302,168 @@ const CandyMachine = ({ walletAddress }) => {
     return [];
   };
 
+
+
+
+
+  const getProvider = () => {
+    const rpcHost = process.env.REACT_APP_SOLANA_RPC_HOST
+    const connection = new Connection(rpcHost)
+
+    const provider = new Provider(
+      connection,
+      window.solana,
+      opts.preflightCommitment
+    )
+
+    return provider
+  }
+
+  const getCandyMachineState = async () => {
+    const provider = getProvider()
+
+    const idl = await Program.fetchIdl(candyMachineProgram, provider)
+
+    const program = new Program(idl, candyMachineProgram, provider)
+
+    const candyMachine = await program.account.candyMachine.fetch(
+      process.env.REACT_APP_CANDY_MACHINE_ID
+    )
+
+    const itemsAvailable = candyMachine.data.itemsAvailable.toNumber()
+    const itemsRedeemed = candyMachine.itemsRedeemed.toNumber()
+    const itemsRemaining = itemsAvailable - itemsRedeemed
+    const goLiveData = candyMachine.data.goLiveDate.toNumber()
+    const presale = 
+      candyMachine.data.whitelistMintSettings &&
+      candyMachine.data.whitelistMintSettings.presale &&
+      (!candyMachine.data.goLiveData ||
+        candyMachine.data.goLiveData.toNumber() > new Date().getTime() / 1000)
+    
+    const goLiveDateTimeString = `${new Date(goLiveData * 1000).toLocaleDateString()} @${new Date(goLiveData * 1000).toLocaleTimeString()}`
+
+    setCandyMachine({
+      id: process.env.REACT_APP_CANDY_MACHINE_ID,
+      program,
+      state: {
+        itemsAvailable,
+        itemsRedeemed,
+        itemsRemaining,
+        goLiveData,
+        goLiveDateTimeString,
+        isSoldOut: itemsRemaining === 0,
+        isActive: (
+          presale || 
+            candyMachine.data.goLiveDate.toNumber() < new Date().getTime() / 1000) && 
+          (candyMachine.endSettings
+            ? candyMachine.endSettings.endSettingsType.date
+              ? candyMachine.endSettings.number.toNumber() > new Date().getTime() / 1000
+              : itemsRedeemed < candyMachine.endSettings.number.toNumber()
+            : true),
+        isPresale: presale,
+        goLiveDate: candyMachine.data.goLiveDate,
+        treasury: candyMachine.wallet,
+        tokenMint: candyMachine.tokenMint,
+        gatekeeper: candyMachine.data.gatekeeper,
+        endSettings: candyMachine.data.endSettings,
+        whitelistMintSettings: candyMachine.data.whitelistMintSettings,
+        hiddenSettings: candyMachine.data.hiddenSettings,
+        price: candyMachine.data.price,
+      }
+    })
+
+    console.log({
+      itemsAvailable,
+      itemsRedeemed,
+      itemsRemaining,
+      goLiveData,
+      goLiveDateTimeString,
+      presale
+    })
+  }
+
+  const renderDropTimer = () => {
+    const currentDate = new Date()
+    const dropDate = new Date(candyMachine.state.goLiveData * 1000)
+
+    if (currentDate < dropDate) {
+      console.log('before drop date!')
+      return <CountdownTimer dropDate={dropDate} />
+    }
+
+    return <p>Drop date: {candyMachine.state.goLiveDateTimeString}</p>
+  }
+
+
+  const MAX_NAME_LENGTH = 32;
+  const MAX_URI_LENGTH = 200;
+  const MAX_SYMBOL_LENGTH = 10;
+  const MAX_CREATOR_LEN = 32 + 1 + 1;
+  const MAX_CREATOR_LIMIT = 5;
+  const MAX_DATA_SIZE = 4 + MAX_NAME_LENGTH + 4 + MAX_SYMBOL_LENGTH + 4 + MAX_URI_LENGTH + 2 + 1 + 4 + MAX_CREATOR_LIMIT * MAX_CREATOR_LEN;
+  const MAX_METADATA_LEN = 1 + 32 + 32 + MAX_DATA_SIZE + 1 + 1 + 9 + 172;
+  const CREATOR_ARRAY_START = 1 + 32 + 32 + 4 + MAX_NAME_LENGTH + 4 + MAX_URI_LENGTH + 4 + MAX_SYMBOL_LENGTH + 2 + 1 + 4;
+
+  const TOKEN_METADATA_PROGRAM = new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s');
+
+  const getMintAddresses = async (firstCreatorAddress) => {
+    const rpcHost = process.env.REACT_APP_SOLANA_RPC_HOST
+    const connection = new Connection(rpcHost)
+
+    const metadataAccounts = await connection.getProgramAccounts(
+        TOKEN_METADATA_PROGRAM,
+        {
+          // The mint address is located at byte 33 and lasts for 32 bytes.
+          dataSlice: { offset: 33, length: 32 },
+  
+          filters: [
+            // Only get Metadata accounts.
+            { dataSize: MAX_METADATA_LEN },
+  
+            // Filter using the first creator.
+            {
+              memcmp: {
+                offset: CREATOR_ARRAY_START,
+                bytes: firstCreatorAddress.toBase58(),
+              },
+            },
+          ],
+        },
+    );
+  
+    return metadataAccounts.map((metadataAccountInfo) => (
+        bs58.encode(metadataAccountInfo.account.data)
+    ));
+  };
+
+  const test = async () => {
+    const machine_id = process.env.REACT_APP_CANDY_MACHINE_ID
+    const creator = await getCandyMachineCreator(machine_id)
+
+    const minted = await getMintAddresses(creator[0])
+    console.log('perro:minted', minted)
+  }
+
+  useEffect(() => {
+    getCandyMachineState()
+    // test()
+  }, [])
+
   return (
-    <div className="machine-container">
-      <p>Drop Date:</p>
-      <p>Items Minted:</p>
-      <button className="cta-button mint-button" onClick={mintToken}>
-        Mint NFT
-      </button>
-    </div>
+    candyMachine && candyMachine.state && (
+      <div className="machine-container">
+        {renderDropTimer()}
+        <p>Items Minted: {candyMachine.state.itemsRedeemed} / {candyMachine.state.itemsAvailable}</p>
+        {
+          candyMachine.state.itemsRedeemed === candyMachine.state.itemsAvailable ? (
+            <p className='sub-text'>sold out🙊</p>
+          ) : <button className="cta-button mint-button" onClick={mintToken}>
+            Mint NFT
+          </button>
+        }
+        {/* {mints.length > 0 && renderMintedItems()}
+        {isLoadingMints && <p>Loading mints...</p>} */}
+      </div>)
   );
 };
 
